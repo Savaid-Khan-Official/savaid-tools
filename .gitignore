@@ -1,0 +1,22 @@
+# SubHunter scan output
+subhunter_*/
+scan_test/
+*.log
+
+# takeover-check output
+takeover_report.txt
+dead_subdomains.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
