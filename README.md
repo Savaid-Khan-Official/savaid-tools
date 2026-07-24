@@ -39,6 +39,29 @@ splits the lot into **live** and **dead**.
 Reads a list of dead subdomains and gathers evidence for takeover analysis —
 CNAME chain, provider identification, HTTP fingerprints — so you can make the call.
 
+### TechFinger — Technology Fingerprinting & Security Intelligence
+
+Runs over every **live** subdomain and answers "what is this, and is it
+vulnerable?". Three phases per host:
+
+- **Phase 1 – Fingerprinting**: web server, language, framework, CMS, JS/CSS
+  libraries, CDN, WAF, reverse proxy, API/analytics/auth tech, TLS, and security
+  headers — each with a **confidence score and the evidence** that produced it,
+  gathered from multiple techniques (headers, cookies, HTML/meta, script `src`,
+  TLS).
+- **Phase 2 – Version validation**: when several techniques report a version,
+  the strongest wins and agreement boosts confidence — never a single weak guess
+  when stronger evidence exists.
+- **Phase 3 – Security intelligence**: for each `(technology, version)` it looks
+  up **CVEs, CVSS, severity** (NVD), **End-of-Life** status (endoflife.date),
+  **public-exploit / Metasploit** availability (CISA KEV + references), and a
+  **recommended fixed version**.
+
+Runs inline in a scan via `--fingerprint`, or standalone via `fingerprint.py`
+against any `live.txt`. Stdlib-only; online lookups are cached and degrade
+gracefully to "unknown" with no network. Set `NVD_API_KEY` for a higher CVE rate
+limit (optional).
+
 ---
 
 ## Install
@@ -198,6 +221,73 @@ RESPONSE_BODY (first 1000 chars):
 At the end it prints a short triage summary to stderr — hosts that have both
 NXDOMAIN **and** a known provider are flagged as the ones to review first.
 
+## TechFinger (technology fingerprinting)
+
+Fingerprint every live host and enrich it with CVE/EOL/exploit intelligence.
+Runs inline in a scan, or standalone against any live list.
+
+```bash
+# Inline: fingerprint every live host during the scan
+./subhunter.py -d example.com --fingerprint
+
+# Fingerprint only, skip the online CVE/EOL lookups (Phase 1+2 only, fully offline)
+./subhunter.py -d example.com --fingerprint --offline-intel
+
+# Standalone, off a scan's live.txt (mirrors takeover_check.py)
+./fingerprint.py -i subhunter_example.com/live.txt -o techfinger_report.txt
+
+# Standalone with a JSON report and more threads
+./fingerprint.py -i live.txt -j techfinger.json --threads 15
+```
+
+A scan run with `--fingerprint` adds two files to the output dir:
+`techfinger.json` (full structured data) and `techfinger.txt` (one readable
+block per host). The module is completely self-contained — if the `techfinger/`
+package is absent or errors, the core scan is unaffected.
+
+| Flag (`fingerprint.py`) | Description |
+|---|---|
+| `-i, --input` | Live-host file, one per line (default `live.txt`) |
+| `-o, --output` | Consolidated text report (default `techfinger_report.txt`) |
+| `-j, --json` | Also write a structured JSON report to this path |
+| `-t, --threads` | Concurrent workers (default 10) |
+| `--timeout` | Per-host HTTP/TLS timeout (default 10s) |
+| `--offline` | Skip online CVE/EOL/exploit lookups (Phase 1+2 only) |
+
+Each finding carries technology, version, confidence, evidence, CVEs, CVSS,
+severity, EOL status, public-exploit and Metasploit availability, and a
+recommended version. Every version is corroborated across techniques (Phase 2)
+before it's trusted, and every CVE comes from **live NVD data** — nothing is
+fabricated. Set the optional `NVD_API_KEY` env var for a higher rate limit.
+
+A text block looks like:
+
+```
+============================================================
+HOST: shop.example.com
+URL: https://shop.example.com
+STATUS: 200
+============================================================
+SECURITY_HEADER_GRADE: C
+MISSING_SECURITY_HEADERS: Content-Security-Policy, Permissions-Policy
+TLS: TLSv1.3 issuer=Let's Encrypt verified=True
+
+TECHNOLOGIES:
+  - nginx  [web-server]  version=1.18.0  confidence=90%
+      evidence(header, 75%): Server: nginx/1.18.0
+      version_candidates: header=1.18.0
+      end_of_life: True  (cycle 1.18 reached EOL (2021-04-20))
+      recommended_version: 1.18.0
+      CVEs (4):
+        CVE-2021-23017  CVSS=7.7  HIGH  PUBLIC-EXPLOIT
+        CVE-2023-44487  CVSS=7.5  HIGH  PUBLIC-EXPLOIT
+```
+
+The `techfinger/` package is modular by design: add a technology by dropping one
+entry into [`techfinger/fingerprints.py`](techfinger/fingerprints.py) — no engine
+change required, the same "table you extend, not code you edit" pattern used by
+the takeover module's provider list.
+
 ## Notes
 
 - **crt.sh is flaky.** It 502s and rate-limits regularly. SubHunter reports it
@@ -210,14 +300,15 @@ NXDOMAIN **and** a known provider are flagged as the ones to review first.
 
 ## Roadmap (v2)
 
+- ~~Technology fingerprinting with CVE/EOL/exploit intelligence~~ ✅ shipped (TechFinger)
 - Port scanning and service detection
 - Screenshots of live hosts
 - `httpx` / `dnsx` / `puredns` integration when installed
 - API keys for SecurityTrails, Shodan, VirusTotal, Censys
 - Recursive enumeration and permutation scanning
 - HTML report
-- Bundled fingerprint database for automated takeover verdicts (currently the
-  takeover module leaves the final call to you / your AI)
+- Wider fingerprint coverage + a bundled fingerprint DB for automated takeover
+  verdicts (currently the takeover module leaves the final call to you / your AI)
 
 ## Legal
 

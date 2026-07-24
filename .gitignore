@@ -7,6 +7,12 @@ scan_test/
 takeover_report.txt
 dead_subdomains.txt
 
+# techfinger (technology fingerprinting) output + cache
+techfinger_report.txt
+techfinger.json
+techfinger.txt
+.subhunter_cache/
+
 # Python
 __pycache__/
 *.py[cod]

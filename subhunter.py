@@ -790,6 +790,7 @@ class SubHunter:
         self.results: dict[str, Subdomain] = {}
         self.tool_results: list[ToolResult] = []
         self.wildcard_ips: set[str] = set()
+        self.fingerprints: list = []
         self.started = datetime.now(timezone.utc)
 
     # -- discovery ---------------------------------------------------------- #
@@ -983,6 +984,81 @@ class SubHunter:
         a = sum(1 for s in self.results.values() if s.alive)
         good(f"{a} host(s) answered on HTTP/HTTPS")
 
+    # -- fingerprinting (techfinger module) --------------------------------- #
+
+    def fingerprint_all(self) -> None:
+        """Phase 1-3 tech fingerprinting on every live host.
+
+        Fully optional and self-contained: if the techfinger package is missing
+        or errors, the scan is unaffected - we warn and move on, exactly like a
+        failed enumeration source.
+        """
+        step("Technology fingerprinting")
+        targets = self.live
+        if not targets:
+            warn("no live hosts to fingerprint")
+            return
+
+        try:
+            import techfinger
+            from techfinger import report as tf_report
+        except Exception as e:  # noqa: BLE001
+            error(f"techfinger module unavailable: {e}")
+            info("the core scan is unaffected; fingerprinting skipped")
+            return
+
+        online = not self.args.offline_intel
+        info(f"fingerprinting {len(targets)} host(s)"
+             f"{'' if online else ' (offline: no CVE/EOL lookup)'}")
+
+        prog = Progress(len(targets), "fingerprint")
+        fps = []
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(self.args.threads, 20)) as pool:
+                futures = {
+                    pool.submit(
+                        techfinger.fingerprint_and_enrich,
+                        s.host,
+                        timeout=self.args.http_timeout,
+                        url=s.url,
+                        online=online,
+                    ): s
+                    for s in targets
+                }
+                for fut in concurrent.futures.as_completed(futures):
+                    sub = futures[fut]
+                    prog.tick()
+                    if _INTERRUPTED.is_set():
+                        break
+                    try:
+                        fp = fut.result()
+                    except Exception as e:  # noqa: BLE001
+                        warn(f"{sub.host}: fingerprint failed: {e}")
+                        continue
+                    fps.append(fp)
+        except KeyboardInterrupt:
+            _INTERRUPTED.set()
+        finally:
+            prog.close()
+
+        # Sort to match the live-host ordering.
+        fps.sort(key=lambda f: f.host)
+        self.fingerprints = fps
+
+        n_tech = sum(len(f.technologies) for f in fps)
+        n_cve = sum(len(t.vulnerabilities) for f in fps for t in f.technologies)
+        n_eol = sum(1 for f in fps for t in f.technologies if t.end_of_life)
+        good(f"{n_tech} technologies, {n_cve} CVEs, {n_eol} EOL across {len(fps)} host(s)")
+
+        if not _QUIET:
+            for fp in fps:
+                try:
+                    tf_report.render_console(fp, C=C, out=out)
+                except _PipeClosed:
+                    raise
+                except Exception as e:  # noqa: BLE001 - printing must not lose data
+                    warn(f"could not render {fp.host} to console: {e}")
+
     # -- reporting ---------------------------------------------------------- #
 
     @property
@@ -1079,6 +1155,20 @@ class SubHunter:
         except (OSError, TypeError, ValueError) as e:
             error(f"failed writing report.json: {e}")
 
+        # Fingerprint reports, when the module ran.
+        if self.fingerprints:
+            try:
+                from techfinger import report as tf_report
+
+                tf_report.write_json(self.fingerprints, out / "techfinger.json", self.domain)
+                written.append("techfinger.json")
+                (out / "techfinger.txt").write_text(
+                    tf_report.render_text(self.fingerprints, self.domain), encoding="utf-8"
+                )
+                written.append("techfinger.txt")
+            except Exception as e:  # noqa: BLE001
+                error(f"failed writing techfinger reports: {e}")
+
         if written:
             good(f"saved {', '.join(written)} -> {C.BOLD}{out}/{C.RESET}")
 
@@ -1104,6 +1194,9 @@ class SubHunter:
                 s.alive = s.resolved
                 if not s.alive:
                     s.reason = "does not resolve (NXDOMAIN)"
+
+        if self.args.fingerprint:
+            self.fingerprint_all()
 
         self.report()
         if not self.args.no_save:
@@ -1140,6 +1233,7 @@ def build_parser() -> argparse.ArgumentParser:
             "examples:\n"
             "  subhunter.py -d example.com\n"
             "  subhunter.py -d example.com --brute -t 100\n"
+            "  subhunter.py -d example.com --fingerprint\n"
             "  subhunter.py -d example.com --exclude crt.sh --no-dead -o ./out\n"
             "  subhunter.py --check\n"
         ),
@@ -1160,6 +1254,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="skip TLS verification for passive API sources (use behind an intercepting proxy)",
     )
     p.add_argument("--no-probe", action="store_true", help="skip HTTP probing (DNS resolution only)")
+    p.add_argument(
+        "--fingerprint",
+        "--fp",
+        dest="fingerprint",
+        action="store_true",
+        help="fingerprint tech + look up CVEs/EOL on every live host (techfinger module)",
+    )
+    p.add_argument(
+        "--offline-intel",
+        action="store_true",
+        help="with --fingerprint: skip online CVE/EOL lookups (Phase 1+2 only)",
+    )
     p.add_argument("--no-dead", action="store_true", help="hide dead hosts from the report")
     p.add_argument("--no-save", action="store_true", help="do not write output files")
     p.add_argument("--no-banner", action="store_true", help="suppress the banner")
