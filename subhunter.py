@@ -411,33 +411,6 @@ class Findomain(_CmdSource):
         return [self.binary, "-t", domain, "-q"]
 
 
-class Amass(_CmdSource):
-    name = "amass"
-    binary = "amass"
-
-    def cmd(self, domain: str, tmpdir: str) -> list[str]:
-        # Passive only. Active amass is slow and noisy; that's a v2 flag.
-        return [self.binary, "enum", "-passive", "-d", domain, "-silent"]
-
-
-class Sublist3r(_CmdSource):
-    name = "sublist3r"
-    binary = "sublist3r"
-
-    def cmd(self, domain: str, tmpdir: str) -> list[str]:
-        self._out = os.path.join(tmpdir, "sublist3r.txt")
-        return [self.binary, "-d", domain, "-n", "-o", self._out]
-
-    def extra_output(self, tmpdir: str) -> str:
-        try:
-            p = os.path.join(tmpdir, "sublist3r.txt")
-            if os.path.exists(p):
-                return Path(p).read_text(errors="replace")
-        except OSError:
-            pass
-        return ""
-
-
 class CrtSh(Source):
     """Certificate transparency via crt.sh - no local tool needed."""
 
@@ -514,8 +487,6 @@ PASSIVE_SOURCES: list[Source] = [
     Subfinder(),
     Assetfinder(),
     Findomain(),
-    Amass(),
-    Sublist3r(),
     CrtSh(),
     HackerTarget(),
 ]
@@ -1121,7 +1092,7 @@ class SubHunter:
 
         if not self.results:
             warn("no subdomains discovered")
-            warn("install more tools (subfinder, assetfinder, amass) or try --brute")
+            warn("install more tools (subfinder, assetfinder, findomain) or try --brute")
             return 1
 
         self.resolve_all()
@@ -1156,7 +1127,7 @@ def check_environment() -> None:
         good(f"installed: {', '.join(installed)}")
     if absent:
         warn(f"missing:   {', '.join(absent)}")
-        info("install on Kali:  sudo apt install -y amass sublist3r assetfinder")
+        info("install on Kali:  sudo apt install -y assetfinder findomain")
         info("or via go:        go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest")
     info("crt.sh + hackertarget always available (no install needed)")
 
@@ -1169,7 +1140,7 @@ def build_parser() -> argparse.ArgumentParser:
             "examples:\n"
             "  subhunter.py -d example.com\n"
             "  subhunter.py -d example.com --brute -t 100\n"
-            "  subhunter.py -d example.com --exclude amass --no-dead -o ./out\n"
+            "  subhunter.py -d example.com --exclude crt.sh --no-dead -o ./out\n"
             "  subhunter.py --check\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1182,7 +1153,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--brute", action="store_true", help="also brute force with a wordlist")
     p.add_argument("--brute-only", action="store_true", help="skip passive sources, brute force only")
     p.add_argument("-w", "--wordlist", help="wordlist for brute force")
-    p.add_argument("--exclude", default="", help="comma-separated sources to skip, e.g. amass,crt.sh")
+    p.add_argument("--exclude", default="", help="comma-separated sources to skip, e.g. crt.sh,hackertarget")
     p.add_argument(
         "--insecure",
         action="store_true",
