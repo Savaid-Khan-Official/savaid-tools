@@ -26,7 +26,7 @@ splits the lot into **live** and **dead**.
 
 #### Features
 
-- **Runs your tools in parallel** — subfinder, assetfinder, findomain, amass, sublist3r
+- **Runs your tools in parallel** — subfinder, assetfinder, findomain
 - **Works with zero tools installed** — crt.sh and hackertarget need nothing but network
 - **Brute force** with SecLists auto-detection, plus a built-in fallback wordlist
 - **Wildcard DNS detection** so brute force doesn't hand you 5,000 false positives
@@ -54,7 +54,7 @@ chmod +x subhunter.py takeover_check.py
 > On Kali/Parrot, install optional tools for better coverage:
 
 ```bash
-sudo apt install -y amass sublist3r assetfinder
+sudo apt install -y assetfinder findomain
 go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 ```
 
